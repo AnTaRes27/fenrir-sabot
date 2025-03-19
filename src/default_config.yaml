@@ -1,0 +1,5 @@
+database:
+  filename: gambling.db
+
+bot:
+  token: INSERT API TOKEN HERE
