@@ -7,6 +7,7 @@ Fenrir Sabot
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import sqlite3
@@ -30,16 +31,24 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+EMOJI = {
+    "seven": "7️⃣",
+    "bar": "◼️",
+    "lemon": "🍋",
+    "grape": "🍇"
+}
+
 
 # config class
 class Config:
     def __init__(self, config_filename: str) -> None:
+        location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
         self.config_filename = config_filename
         try:
-            self.config = yaml.safe_load(open(self.config_filename))
+            self.config = yaml.safe_load(open(os.path.join(location, config_filename)))
         except FileNotFoundError:
             logger.warning("No config file found! Creating one..")
-            shutil.copyfile("default_config.yaml", self.config_filename)
+            shutil.copyfile(os.path.join(location, "default_config.yaml"), config_filename)
             logger.warning(
                 f"Insert your API key in {self.config_filename} and rerun program."
             )
@@ -68,72 +77,56 @@ class GamblerInfoHandler:
             """
             cursor.execute(q_create_table)
             connection.commit()
-        self.SLOT_MACHINE_VALUE = {
-            1: ("bar", "bar", "bar"),
-            2: ("grape", "bar", "bar"),
-            3: ("lemon", "bar", "bar"),
-            4: ("seven", "bar", "bar"),
-            5: ("bar", "grape", "bar"),
-            6: ("grape", "grape", "bar"),
-            7: ("lemon", "grape", "bar"),
-            8: ("seven", "grape", "bar"),
-            9: ("bar", "lemon", "bar"),
-            10: ("grape", "lemon", "bar"),
-            11: ("lemon", "lemon", "bar"),
-            12: ("seven", "lemon", "bar"),
-            13: ("bar", "seven", "bar"),
-            14: ("grape", "seven", "bar"),
-            15: ("lemon", "seven", "bar"),
-            16: ("seven", "seven", "bar"),
-            17: ("bar", "bar", "grape"),
-            18: ("grape", "bar", "grape"),
-            19: ("lemon", "bar", "grape"),
-            20: ("seven", "bar", "grape"),
-            21: ("bar", "grape", "grape"),
-            22: ("grape", "grape", "grape"),
-            23: ("lemon", "grape", "grape"),
-            24: ("seven", "grape", "grape"),
-            25: ("bar", "lemon", "grape"),
-            26: ("grape", "lemon", "grape"),
-            27: ("lemon", "lemon", "grape"),
-            28: ("seven", "lemon", "grape"),
-            29: ("bar", "seven", "grape"),
-            30: ("grape", "seven", "grape"),
-            31: ("lemon", "seven", "grape"),
-            32: ("seven", "seven", "grape"),
-            33: ("bar", "bar", "lemon"),
-            34: ("grape", "bar", "lemon"),
-            35: ("lemon", "bar", "lemon"),
-            36: ("seven", "bar", "lemon"),
-            37: ("bar", "grape", "lemon"),
-            38: ("grape", "grape", "lemon"),
-            39: ("lemon", "grape", "lemon"),
-            40: ("seven", "grape", "lemon"),
-            41: ("bar", "lemon", "lemon"),
-            42: ("grape", "lemon", "lemon"),
-            43: ("lemon", "lemon", "lemon"),
-            44: ("seven", "lemon", "lemon"),
-            45: ("bar", "seven", "lemon"),
-            46: ("grape", "seven", "lemon"),
-            47: ("lemon", "seven", "lemon"),
-            48: ("seven", "seven", "lemon"),
-            49: ("bar", "bar", "seven"),
-            50: ("grape", "bar", "seven"),
-            51: ("lemon", "bar", "seven"),
-            52: ("seven", "bar", "seven"),
-            53: ("bar", "grape", "seven"),
-            54: ("grape", "grape", "seven"),
-            55: ("lemon", "grape", "seven"),
-            56: ("seven", "grape", "seven"),
-            57: ("bar", "lemon", "seven"),
-            58: ("grape", "lemon", "seven"),
-            59: ("lemon", "lemon", "seven"),
-            60: ("seven", "lemon", "seven"),
-            61: ("bar", "seven", "seven"),
-            62: ("grape", "seven", "seven"),
-            63: ("lemon", "seven", "seven"),
-            64: ("seven", "seven", "seven"),
-        }
+        self.setup_slot_machine_values()
+
+    def setup_slot_machine_values(self):
+        """Set up slot machine values with meaningful lookups."""
+        symbols = ["bar", "grape", "lemon", "seven"]
+        self.SLOT_MACHINE_VALUE = {}
+        self.COMBINATIONS = {}
+
+        # Generate all combinations
+        index = 1
+        for first in symbols:
+            for second in symbols:
+                for third in symbols:
+                    self.SLOT_MACHINE_VALUE[index] = (first, second, third)
+
+                    # Store reverse mapping for lookup
+                    combo_key = f"{first}_{second}_{third}"
+                    self.COMBINATIONS[combo_key] = index
+
+                    index += 1
+
+        self.TRIPLE_SEVEN = self.COMBINATIONS["seven_seven_seven"]
+        self.TRIPLE_BAR = self.COMBINATIONS["bar_bar_bar"]
+        self.TRIPLE_LEMON = self.COMBINATIONS["lemon_lemon_lemon"]
+        self.TRIPLE_GRAPE = self.COMBINATIONS["grape_grape_grape"]
+
+        # Double bar combinations
+        self.DOUBLE_BAR_COMBOS = [
+            self.COMBINATIONS[f"bar_bar_{symbol}"] for symbol in symbols if symbol != "bar"
+        ] + [
+            self.COMBINATIONS[f"bar_{symbol}_bar"] for symbol in symbols if symbol != "bar"
+        ] + [
+            self.COMBINATIONS[f"{symbol}_bar_bar"] for symbol in symbols if symbol != "bar"
+        ]
+
+    def get_combo_name(self, value: int) -> str:
+        """Return a human-readable name for a slot combination."""
+        if value == self.TRIPLE_SEVEN:
+            return "Triple Seven"
+        elif value == self.TRIPLE_BAR:
+            return "Triple Bar"
+        elif value == self.TRIPLE_LEMON:
+            return "Triple Lemon"
+        elif value == self.TRIPLE_GRAPE:
+            return "Triple Grape"
+        elif value in self.DOUBLE_BAR_COMBOS:
+            return "Double Bar"
+        else:
+            symbols = self.SLOT_MACHINE_VALUE[value]
+            return f"{symbols[0].capitalize()}-{symbols[1].capitalize()}-{symbols[2].capitalize()}"
 
     def init_data(self, id: int, name: str) -> dict[int, str, list, int]:
         # telegram's slot machine is a 1-64 RNG, each number corresponds to a 3 slot combo
@@ -238,10 +231,10 @@ class GamblerInfoHandler:
     def update_balance(self, id: int, balance: int) -> None:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
-            q_update_tally = """
+            q_update_balance = """
                 UPDATE Gambler_Tally SET balance_cents = ? WHERE id = ?;
             """
-            cursor.execute(q_update_tally, (balance, id))
+            cursor.execute(q_update_balance, (balance, id))
             connection.commit()
 
 
@@ -286,15 +279,24 @@ async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     logger.info(f"stat call: {data}")
     total_plays = sum(data["tally"])
+
+    # Handle case where username might be None
+    display_name = f"@{username}" if username else name
+
+    triple_seven = gambler_info_handler.TRIPLE_SEVEN - 1  # Adjust for 0-indexing in tally
+    triple_bar = gambler_info_handler.TRIPLE_BAR - 1
+    triple_lemon = gambler_info_handler.TRIPLE_LEMON - 1
+    triple_grape = gambler_info_handler.TRIPLE_GRAPE - 1
+    
     message = f"""
-@{username}'s Performance
+{display_name}'s Performance
 Total Plays: {total_plays}
 
 Wins:
-7️⃣7️⃣7️⃣: {data["tally"][64-1]}
-◼️◼️◼️: {data["tally"][1-1]}
-🍋🍋🍋: {data["tally"][43-1]}
-🍇🍇🍇: {data["tally"][22-1]}
+{EMOJI["seven"]}{EMOJI["seven"]}{EMOJI["seven"]}: {data["tally"][triple_seven]}
+{EMOJI["bar"]}{EMOJI["bar"]}{EMOJI["bar"]}: {data["tally"][triple_bar]}
+{EMOJI["lemon"]}{EMOJI["lemon"]}{EMOJI["lemon"]}: {data["tally"][triple_lemon]}
+{EMOJI["grape"]}{EMOJI["grape"]}{EMOJI["grape"]}: {data["tally"][triple_grape]}
 
 Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/100:.2f}
 """
@@ -303,12 +305,12 @@ Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/1
 
 @command_handler("paytable")
 async def paytable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = """
+    message = f"""
 Payout:
-7️⃣7️⃣7️⃣: $20.00
-◼️◼️◼️: $10.00
-🍋🍋🍋/🍇🍇🍇: $2.50
-Any Two ◼️: $0.25
+{EMOJI["seven"]}{EMOJI["seven"]}{EMOJI["seven"]}: $20.00
+{EMOJI["bar"]}{EMOJI["bar"]}{EMOJI["bar"]}: $10.00
+{EMOJI["lemon"]}{EMOJI["lemon"]}{EMOJI["lemon"]}/{EMOJI["grape"]}{EMOJI["grape"]}{EMOJI["grape"]}: $2.50
+Any Two {EMOJI["bar"]}: $0.25
 
 Bet Amount = $0.25
 """
@@ -322,18 +324,17 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     top_users = gambler_info_handler.get_leaderboard(10)
 
+    top_users = [user for user in top_users if sum(user["tally"]) > 0]
+
     if not top_users:
         await update.message.reply_text("No gambling has taken place yet... Be the first to win big! 🎰")
         return
 
     current_user_in_top = any(user["id"] == current_user_id for user in top_users)
 
-    # Get current user's data and rank if not in top 5
-    current_user_data = None
-    current_user_rank = None
-    if not current_user_in_top:
-        current_user_data = gambler_info_handler.get_data(current_user_id, current_user_name)
-        current_user_rank = gambler_info_handler.get_user_rank(current_user_id)
+    current_user_data = gambler_info_handler.get_data(current_user_id, current_user_name)
+    current_user_rank = gambler_info_handler.get_user_rank(current_user_id)
+    has_played = sum(current_user_data["tally"]) > 0
 
     message = "🎰 Gambling Leaderboard 🎰\n\n"
 
@@ -342,17 +343,17 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         balance = user["balance_cents"] / 100
         balance_str = f"{'$' if balance >= 0 else '-$'}{abs(balance):.2f}"
 
-        # Mark the current user if they're in the top 5
         user_indicator = " (You)" if user["id"] == current_user_id else ""
 
         message += f"{rank}. {user['name']}: {balance_str}{user_indicator}\n"
 
-    # Add ellipsis and current user if not in top 5 and user has played at least once
-    if not current_user_in_top and current_user_data and sum(current_user_data["tally"]) > 0:
+    if has_played and not current_user_in_top:
         message += "...\n"
         current_user_balance = current_user_data["balance_cents"] / 100
         balance_str = f"{'$' if current_user_balance >= 0 else '-$'}{abs(current_user_balance):.2f}"
         message += f"{current_user_rank}. {current_user_name}: {balance_str} (You)\n"
+    elif not has_played:
+        message += "\nYou haven't tried your luck yet... Send the 🎰 emoji to win big!"
 
     await update.message.reply_text(message)
 
@@ -363,10 +364,7 @@ async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @message_handler(filters.Dice.SLOT_MACHINE & ~filters.FORWARDED)
-async def slot_machine_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    # logger.info(update.message.dice)
+async def slot_machine_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     id = update.message.from_user.id
     name = update.message.from_user.full_name
     value = update.message.dice.value
@@ -380,27 +378,28 @@ async def slot_machine_handler(
     # update balance
     # remember they're in cents
     balance = data["balance_cents"]
-    match value:
-        case 64:
-            balance_add = 2000
-        case 1:
-            balance_add = 1000
-        case 43 | 22:
-            balance_add = 250
-        case 22:
-            balance_add = 250
-        case 2 | 3 | 4 | 5 | 9 | 13 | 17 | 33 | 49:
-            balance_add = 25
-        case _:
-            balance_add = -25
+
+    if value == gambler_info_handler.TRIPLE_SEVEN:
+        balance_add = 2000
+    elif value == gambler_info_handler.TRIPLE_BAR:
+        balance_add = 1000
+    elif value == gambler_info_handler.TRIPLE_LEMON or value == gambler_info_handler.TRIPLE_GRAPE:
+        balance_add = 250
+    elif value in gambler_info_handler.DOUBLE_BAR_COMBOS:
+        balance_add = 25
+    else:
+        balance_add = -25
+
     balance += balance_add
     gambler_info_handler.update_balance(id, balance)
 
+    combo_name = gambler_info_handler.get_combo_name(value)
+
     logger.info(
-        f"""{name}({id}) - {update.message.dice} - Total Game: {sum(tally)} - Balance: {"" if balance>=0 else "-"}$ {abs(balance)/100:.2f}"""
+        f"""{name}({id}) - {combo_name} - Total Games: {sum(tally)} - Balance: {"" if balance>=0 else "-"}${abs(balance)/100:.2f}"""
     )
 
-    if value == 64:
+    if value == gambler_info_handler.TRIPLE_SEVEN:
         await update.message.reply_text("Ahoy!")
 
 
@@ -419,7 +418,6 @@ async def debugging(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     app.add_handler(MessageHandler(None, debugging))
-
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
