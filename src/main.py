@@ -263,7 +263,7 @@ Payout:
 7️⃣7️⃣7️⃣: $20.00
 ◼️◼️◼️: $10.00
 🍋🍋🍋/🍇🍇🍇: $2.50
-Any Two ◼️: $1.25
+Any Two ◼️: $0.25
 
 Bet Amount = $0.25
 """
@@ -280,7 +280,7 @@ async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pass
 
 
-@message_handler(filters.Dice.SLOT_MACHINE)
+@message_handler(filters.Dice.SLOT_MACHINE & ~filters.FORWARDED)
 async def slot_machine_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
