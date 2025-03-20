@@ -181,11 +181,56 @@ class GamblerInfoHandler:
                     "balance_cents": data[3],
                 }
 
+    def get_leaderboard(self, limit: int) -> list[dict[int, str, list, int]]:
+        with sqlite3.connect(self.db_filename) as connection:
+            cursor = connection.cursor()
+            q_get_topX = """
+                SELECT id, name, tally, balance_cents FROM Gambler_Tally ORDER BY balance_cents DESC LIMIT ?;
+            """
+            cursor.execute(q_get_topX, (limit,))
+            data = cursor.fetchall()
+
+            if not data:
+                return []
+
+            return [
+                {
+                    "id": user[0],
+                    "name": user[1],
+                    "tally": json.loads(user[2]),
+                    "balance_cents": user[3],
+                }
+                for user in data
+            ]
+
+    def get_user_rank(self, id: int) -> int:
+        with sqlite3.connect(self.db_filename) as connection:
+            cursor = connection.cursor()
+
+            q_get_balance = """
+                SELECT balance_cents FROM Gambler_Tally WHERE id = ?;
+            """
+            cursor.execute(q_get_balance, (id,))
+            balance_result = cursor.fetchone()
+
+            if balance_result is None:
+                return 0  # User not found
+                
+            balance = balance_result[0]
+
+            q_get_rank = """
+                SELECT COUNT(*) FROM Gambler_Tally WHERE balance_cents > ?;
+            """
+            cursor.execute(q_get_rank, (balance,))
+            rank_above = cursor.fetchone()[0]
+
+            return rank_above + 1
+
     def update_tally(self, id: int, tally: list) -> None:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_update_tally = """
-                UPDATE Gambler_tally SET tally = ? WHERE id = ?;
+                UPDATE Gambler_Tally SET tally = ? WHERE id = ?;
             """
             cursor.execute(q_update_tally, (json.dumps(tally), id))
             connection.commit()
@@ -194,7 +239,7 @@ class GamblerInfoHandler:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_update_tally = """
-                UPDATE Gambler_tally SET balance_cents = ? WHERE id = ?;
+                UPDATE Gambler_Tally SET balance_cents = ? WHERE id = ?;
             """
             cursor.execute(q_update_tally, (balance, id))
             connection.commit()
@@ -272,7 +317,44 @@ Bet Amount = $0.25
 
 @command_handler("leaderboard")
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    pass
+    current_user_id = update.message.from_user.id
+    current_user_name = update.message.from_user.full_name
+
+    top_users = gambler_info_handler.get_leaderboard(10)
+
+    if not top_users:
+        await update.message.reply_text("No gambling has taken place yet... Be the first to win big! 🎰")
+        return
+
+    current_user_in_top = any(user["id"] == current_user_id for user in top_users)
+
+    # Get current user's data and rank if not in top 5
+    current_user_data = None
+    current_user_rank = None
+    if not current_user_in_top:
+        current_user_data = gambler_info_handler.get_data(current_user_id, current_user_name)
+        current_user_rank = gambler_info_handler.get_user_rank(current_user_id)
+
+    message = "🎰 Gambling Leaderboard 🎰\n\n"
+
+    for i, user in enumerate(top_users):
+        rank = i + 1
+        balance = user["balance_cents"] / 100
+        balance_str = f"{'$' if balance >= 0 else '-$'}{abs(balance):.2f}"
+
+        # Mark the current user if they're in the top 5
+        user_indicator = " (You)" if user["id"] == current_user_id else ""
+
+        message += f"{rank}. {user['name']}: {balance_str}{user_indicator}\n"
+
+    # Add ellipsis and current user if not in top 5 and user has played at least once
+    if not current_user_in_top and current_user_data and sum(current_user_data["tally"]) > 0:
+        message += "...\n"
+        current_user_balance = current_user_data["balance_cents"] / 100
+        balance_str = f"{'$' if current_user_balance >= 0 else '-$'}{abs(current_user_balance):.2f}"
+        message += f"{current_user_rank}. {current_user_name}: {balance_str} (You)\n"
+
+    await update.message.reply_text(message)
 
 
 @command_handler("redeem")
