@@ -4,7 +4,10 @@
 Fenrir Sabot
 """
 
+from __future__ import annotations
+
 import logging
+import sys
 
 import sqlite3
 import shutil
@@ -21,21 +24,26 @@ from telegram.ext import (
 
 # enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - [%(levelname)s] %(message)s", level=logging.INFO
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
 
+# config class
 class Config:
-    def __init__(self, config_filename):
+    def __init__(self, config_filename: str) -> None:
         self.config_filename = config_filename
         try:
             self.config = yaml.safe_load(open(self.config_filename))
         except FileNotFoundError:
+            logger.warning("No config file found! Creating one..")
             shutil.copyfile("default_config.yaml", self.config_filename)
-            self.config = yaml.safe_load(open(self.config_filename))
+            logger.warning(
+                f"Insert your API key in {self.config_filename} and rerun program."
+            )
+            sys.exit()
 
         self.db_filename = self.config["database"]["filename"]
         self.token = self.config["bot"]["token"]
@@ -44,8 +52,9 @@ class Config:
 config = Config("config.yaml")
 
 
+# gambler info handler class
 class GamblerInfoHandler:
-    def __init__(self, db_filename):
+    def __init__(self, db_filename: str) -> None:
         self.db_filename = db_filename
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
@@ -59,7 +68,7 @@ class GamblerInfoHandler:
             """
             cursor.execute(q_create_table)
             connection.commit()
-        self.slot_machine_value = {
+        self.SLOT_MACHINE_VALUE = {
             1: ("bar", "bar", "bar"),
             2: ("grape", "bar", "bar"),
             3: ("lemon", "bar", "bar"),
@@ -126,7 +135,7 @@ class GamblerInfoHandler:
             64: ("seven", "seven", "seven"),
         }
 
-    def init_data(self, id, name):
+    def init_data(self, id: int, name: str) -> dict[int, str, list, int]:
         # telegram's slot machine is a 1-64 RNG, each number corresponds to a 3 slot combo
         tally = []
         for x in range(64):
@@ -154,7 +163,7 @@ class GamblerInfoHandler:
             "balance_cents": balance_cents,
         }
 
-    def get_data(self, id, name):
+    def get_data(self, id: int, name: str) -> dict[int, str, list, int]:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_get_user = """
@@ -172,7 +181,7 @@ class GamblerInfoHandler:
                     "balance_cents": data[3],
                 }
 
-    def update_tally(self, id, tally):
+    def update_tally(self, id: int, tally: list) -> None:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_update_tally = """
@@ -181,7 +190,7 @@ class GamblerInfoHandler:
             cursor.execute(q_update_tally, (json.dumps(tally), id))
             connection.commit()
 
-    def update_balance(self, id, balance):
+    def update_balance(self, id: int, balance: int) -> None:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_update_tally = """
@@ -193,11 +202,11 @@ class GamblerInfoHandler:
 
 gambler_info_handler = GamblerInfoHandler(config.db_filename)
 
-
+# bot definitions
 app = ApplicationBuilder().token(config.token).build()
 
 
-def command_handler(command):
+def command_handler(command: str):
     def decorator(func):
         handler = CommandHandler(command, func)
         app.add_handler(handler)
@@ -206,8 +215,8 @@ def command_handler(command):
     return decorator
 
 
-def message_handler(filters):
-    def decorator(func):
+def message_handler(filters: filters) -> callable[[callable], callable]:
+    def decorator(func: callable[[Update, ContextTypes.DEFAULT_TYPE], None]):
         handler = MessageHandler(filters, func)
         app.add_handler(handler)
         return func
@@ -219,14 +228,22 @@ def message_handler(filters):
 async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     id = update.message.from_user.id
     name = update.message.from_user.full_name
-    data = gambler_info_handler.get_data(id, name)
-    total_plays = sum(data["tally"])
+    username = update.message.from_user.username
+    reply_to_message_obj = update.message.reply_to_message
+
+    if reply_to_message_obj is not None:
+        reply_to_user_id = reply_to_message_obj.from_user.id
+        reply_to_user_name = reply_to_message_obj.from_user.full_name
+        username = reply_to_message_obj.from_user.username
+        data = gambler_info_handler.get_data(reply_to_user_id, reply_to_user_name)
+    else:
+        data = gambler_info_handler.get_data(id, name)
 
     logger.info(f"stat call: {data}")
-
+    total_plays = sum(data["tally"])
     message = f"""
-Total Plays:
-{total_plays}
+@{username}'s Performance
+Total Plays: {total_plays}
 
 Wins:
 7️⃣7️⃣7️⃣: {data["tally"][64-1]}
@@ -234,8 +251,7 @@ Wins:
 🍋🍋🍋: {data["tally"][43-1]}
 🍇🍇🍇: {data["tally"][22-1]}
 
-Balance:
-{"" if data["balance_cents"]>=0 else "-"}$ {abs(data["balance_cents"])/100:.2f}
+Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/100:.2f}
 """
     await update.message.reply_text(message)
 
@@ -252,6 +268,16 @@ Any Two ◼️: $1.25
 Bet Amount = $0.25
 """
     await update.message.reply_text(message)
+
+
+@command_handler("leaderboard")
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pass
+
+
+@command_handler("redeem")
+async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pass
 
 
 @message_handler(filters.Dice.SLOT_MACHINE)
@@ -296,12 +322,9 @@ async def slot_machine_handler(
         await update.message.reply_text("Ahoy!")
 
 
-async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(f"Ahoy! {update.effective_user.first_name}")
-
-
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Echo the user message"""
+async def debugging(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """logs user message for debugging"""
+    logger.info(update.message)
     # await update.message.reply_text(update.message.text)
     # logger.info(update.chat_member)
     # logger.info(update.message.chat.id)
@@ -309,14 +332,11 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # logger.info(update.message.text)
     # logger.info(update.message.chat)
     logger.info(update.message.from_user)
-    logger.info(update.message.dice)
+    # logger.info(update.message.dice)
 
 
 def main() -> None:
-
-    app.add_handler(CommandHandler("ahoy", hello))
-
-    app.add_handler(MessageHandler(None, echo))
+    app.add_handler(MessageHandler(None, debugging))
 
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
