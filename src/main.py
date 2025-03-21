@@ -16,7 +16,7 @@ import sqlite3
 import shutil
 import yaml
 import json
-from telegram import Update
+from telegram import Update, constants, Dice
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -73,6 +73,7 @@ class Config:
         self.db_filename = self.config["database"]["filename"]
         self.token = self.config["bot"]["token"]
         self.dev_mode = self.config["bot"]["dev_mode"]
+        self.paytable = self.config["game_settings"]["slot_machine"]["paytable"]
 
 
 config = Config(config_filename)
@@ -93,7 +94,18 @@ class GamblerInfoHandler:
             );
             """
             cursor.execute(q_create_table)
-            connection.commit()
+
+            query = """
+            CREATE TABLE IF NOT EXISTS Gambler_Ledger (
+                trans_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                emoji TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                slot_paytable TEXT,
+                bet_cents INTEGER
+            );
+            """
+            cursor.execute(query)
         self.setup_slot_machine_values()
 
     def setup_slot_machine_values(self):
@@ -245,6 +257,23 @@ class GamblerInfoHandler:
             rank_above = cursor.fetchone()[0]
 
             return rank_above + 1
+
+    def record_transaction(
+        self,
+        id: int,
+        emoji: constants.DiceEmoji,
+        value: int,
+        slot_payout_table: list[dict[list[Slot_Emoji, Slot_Emoji, Slot_Emoji], int]],
+        bet_cents: int,
+    ) -> int:
+        with sqlite3.connect("dev_gambling.db") as connection:
+            cursor = connection.cursor()
+            query = """
+                INSERT INTO Gambler_Ledger (user_id, emoji, value, slot_paytable, bet_cents)
+                VALUES (?, ?, ?, ?, ?);
+            """
+            entry_data = (id, emoji, value, slot_payout_table, bet_cents)
+            cursor.execute(query, entry_data)
 
     def update_tally(self, id: int, tally: list) -> None:
         if config.dev_mode:
@@ -408,6 +437,7 @@ async def slot_machine_handler(
     name = update.message.from_user.full_name
     value = update.message.dice.value
     data = gambler_info_handler.get_data(id, name)
+    bet_cents = 25
 
     # update tally
     tally = data["tally"]
@@ -436,6 +466,10 @@ async def slot_machine_handler(
     gambler_info_handler.update_balance(id, balance)
 
     combo_name = gambler_info_handler.get_combo_name(value)
+
+    gambler_info_handler.record_transaction(
+        id, Dice.SLOT_MACHINE, value, config.paytable, bet_cents
+    )
 
     logger.info(
         f"""{name}({id}) - {combo_name} - Total Games: {sum(tally)} - Balance: {"" if balance>=0 else "-"}${abs(balance)/100:.2f}"""
