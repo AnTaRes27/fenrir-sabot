@@ -469,6 +469,9 @@ async def slot_machine_handler(
     # remember they're in cents
     balance = data["balance_cents"]
 
+    # price of play
+    balance -= 25
+
     if value == gambler_info_handler.TRIPLE_SEVEN:
         balance_add = 2000
     elif value == gambler_info_handler.TRIPLE_BAR:
@@ -481,7 +484,7 @@ async def slot_machine_handler(
     elif value in gambler_info_handler.DOUBLE_BAR_COMBOS:
         balance_add = 25
     else:
-        balance_add = -25
+        balance_add = 0
 
     balance += balance_add
     gambler_info_handler.update_balance(id, balance)
