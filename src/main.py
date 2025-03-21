@@ -73,7 +73,9 @@ class Config:
         self.db_filename = self.config["database"]["filename"]
         self.token = self.config["bot"]["token"]
         self.dev_mode = self.config["bot"]["dev_mode"]
-        self.paytable = self.config["game_settings"]["slot_machine"]["paytable"]
+        self.paytable = json.loads(
+            self.config["game_settings"]["slot_machine"]["paytable"]
+        )
 
 
 config = Config(config_filename)
@@ -367,15 +369,34 @@ Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/1
 
 @command_handler("paytable")
 async def paytable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = f"""
-Payout:
-{Slot_Emoji.SEVEN*3}: $20.00
-{Slot_Emoji.BAR*3}: $10.00
-{Slot_Emoji.LEMON*3}/{Slot_Emoji.GRAPE*3}: $2.50
-Any Two {Slot_Emoji.BAR}: $0.25
+    bet_cents = 25
 
-Bet Amount = $0.25
-"""
+    message = "Payout:\n"
+
+    for payout_row in config.paytable:
+        non_any_emoji = [x for x in payout_row["combo"] if x != Slot_Emoji.ANY]
+        payout_amount = f"""{payout_row["payout_mult"]*bet_cents/100:.2f}"""
+        if payout_row["combo"].count(Slot_Emoji.ANY) == 0:
+            emoji = non_any_emoji[0]
+            message += (
+                f"""{emoji*3}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
+            )
+        elif payout_row["combo"].count(Slot_Emoji.ANY) == 2:
+            emoji = non_any_emoji[0]
+            message += (
+                f"""Any {emoji}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
+            )
+        elif (
+            payout_row["combo"].count(Slot_Emoji.ANY) == 1
+            and payout_row["combo"][0] == payout_row["combo"][1]
+        ):
+            emoji = non_any_emoji[0]
+            message += f"""Any two {emoji}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
+        else:
+            message += f"""Any combo of {"".join(non_any_emoji)}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
+    message += "\n"
+
+    message += f"Bet Amount = ${bet_cents/100:.2f}"
     await update.message.reply_text(message)
 
 
