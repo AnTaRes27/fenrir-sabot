@@ -31,24 +31,23 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-EMOJI = {
-    "seven": "7️⃣",
-    "bar": "◼️",
-    "lemon": "🍋",
-    "grape": "🍇"
-}
+EMOJI = {"seven": "7️⃣", "bar": "◼️", "lemon": "🍋", "grape": "🍇"}
 
 
 # config class
 class Config:
     def __init__(self, config_filename: str) -> None:
-        location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+        location = os.path.realpath(
+            os.path.join(os.getcwd(), os.path.dirname(__file__))
+        )
         self.config_filename = config_filename
         try:
             self.config = yaml.safe_load(open(os.path.join(location, config_filename)))
         except FileNotFoundError:
             logger.warning("No config file found! Creating one..")
-            shutil.copyfile(os.path.join(location, "default_config.yaml"), config_filename)
+            shutil.copyfile(
+                os.path.join(location, "default_config.yaml"), config_filename
+            )
             logger.warning(
                 f"Insert your API key in {self.config_filename} and rerun program."
             )
@@ -104,13 +103,23 @@ class GamblerInfoHandler:
         self.TRIPLE_GRAPE = self.COMBINATIONS["grape_grape_grape"]
 
         # Double bar combinations
-        self.DOUBLE_BAR_COMBOS = [
-            self.COMBINATIONS[f"bar_bar_{symbol}"] for symbol in symbols if symbol != "bar"
-        ] + [
-            self.COMBINATIONS[f"bar_{symbol}_bar"] for symbol in symbols if symbol != "bar"
-        ] + [
-            self.COMBINATIONS[f"{symbol}_bar_bar"] for symbol in symbols if symbol != "bar"
-        ]
+        self.DOUBLE_BAR_COMBOS = (
+            [
+                self.COMBINATIONS[f"bar_bar_{symbol}"]
+                for symbol in symbols
+                if symbol != "bar"
+            ]
+            + [
+                self.COMBINATIONS[f"bar_{symbol}_bar"]
+                for symbol in symbols
+                if symbol != "bar"
+            ]
+            + [
+                self.COMBINATIONS[f"{symbol}_bar_bar"]
+                for symbol in symbols
+                if symbol != "bar"
+            ]
+        )
 
     def get_combo_name(self, value: int) -> str:
         """Return a human-readable name for a slot combination."""
@@ -208,7 +217,7 @@ class GamblerInfoHandler:
 
             if balance_result is None:
                 return 0  # User not found
-                
+
             balance = balance_result[0]
 
             q_get_rank = """
@@ -283,13 +292,15 @@ async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Handle case where username might be None
     display_name = f"@{username}" if username else name
 
-    triple_seven = gambler_info_handler.TRIPLE_SEVEN - 1  # Adjust for 0-indexing in tally
+    triple_seven = (
+        gambler_info_handler.TRIPLE_SEVEN - 1
+    )  # Adjust for 0-indexing in tally
     triple_bar = gambler_info_handler.TRIPLE_BAR - 1
     triple_lemon = gambler_info_handler.TRIPLE_LEMON - 1
     triple_grape = gambler_info_handler.TRIPLE_GRAPE - 1
-    
+
     message = f"""
-{display_name}'s Performance
+{display_name}'s Performance 
 Total Plays: {total_plays}
 
 Wins:
@@ -327,12 +338,16 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     top_users = [user for user in top_users if sum(user["tally"]) > 0]
 
     if not top_users:
-        await update.message.reply_text("No gambling has taken place yet... Be the first to win big! 🎰")
+        await update.message.reply_text(
+            "No gambling has taken place yet... Be the first to win big! 🎰"
+        )
         return
 
     current_user_in_top = any(user["id"] == current_user_id for user in top_users)
 
-    current_user_data = gambler_info_handler.get_data(current_user_id, current_user_name)
+    current_user_data = gambler_info_handler.get_data(
+        current_user_id, current_user_name
+    )
     current_user_rank = gambler_info_handler.get_user_rank(current_user_id)
     has_played = sum(current_user_data["tally"]) > 0
 
@@ -364,7 +379,9 @@ async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @message_handler(filters.Dice.SLOT_MACHINE & ~filters.FORWARDED)
-async def slot_machine_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def slot_machine_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     id = update.message.from_user.id
     name = update.message.from_user.full_name
     value = update.message.dice.value
@@ -383,7 +400,10 @@ async def slot_machine_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         balance_add = 2000
     elif value == gambler_info_handler.TRIPLE_BAR:
         balance_add = 1000
-    elif value == gambler_info_handler.TRIPLE_LEMON or value == gambler_info_handler.TRIPLE_GRAPE:
+    elif (
+        value == gambler_info_handler.TRIPLE_LEMON
+        or value == gambler_info_handler.TRIPLE_GRAPE
+    ):
         balance_add = 250
     elif value in gambler_info_handler.DOUBLE_BAR_COMBOS:
         balance_add = 25
