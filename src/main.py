@@ -87,7 +87,7 @@ class GamblerInfoHandler:
         self.db_filename = db_filename
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
-            q_create_table = """
+            query = """
             CREATE TABLE IF NOT EXISTS Gambler_Tally (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -96,7 +96,7 @@ class GamblerInfoHandler:
                 username TEXT
             );
             """
-            cursor.execute(q_create_table)
+            cursor.execute(query)
 
             query = """
             CREATE TABLE IF NOT EXISTS Gambler_Ledger (
@@ -194,13 +194,13 @@ class GamblerInfoHandler:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
 
-            q_add_entry = """
+            query = """
             INSERT INTO Gambler_Tally (id, name, tally, balance_cents, username)
             VALUES (?, ?, ?, ?, ?);
             """
             entry_data = (id, name, tally_json, balance_cents, username)
 
-            cursor.execute(q_add_entry, entry_data)
+            cursor.execute(query, entry_data)
             connection.commit()
         return {
             "id": id,
@@ -213,10 +213,10 @@ class GamblerInfoHandler:
     def get_data(self, id: int, name: str, username: str) -> dict[int, str, list, int]:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
-            q_get_user = """
+            query = """
                 SELECT id, name, tally, balance_cents, username FROM Gambler_Tally WHERE id=?;
             """
-            cursor.execute(q_get_user, (id,))
+            cursor.execute(query, (id,))
             data = cursor.fetchone()
             if data is None:
                 return self.init_data(id, name, username)
@@ -232,10 +232,10 @@ class GamblerInfoHandler:
     def get_leaderboard(self, limit: int) -> list[dict[int, str, list, int]]:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
-            q_get_topX = """
+            query = """
                 SELECT id, name, tally, balance_cents FROM Gambler_Tally ORDER BY balance_cents DESC LIMIT ?;
             """
-            cursor.execute(q_get_topX, (limit,))
+            cursor.execute(query, (limit,))
             data = cursor.fetchall()
 
             if not data:
@@ -255,10 +255,10 @@ class GamblerInfoHandler:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
 
-            q_get_balance = """
+            query = """
                 SELECT balance_cents FROM Gambler_Tally WHERE id = ?;
             """
-            cursor.execute(q_get_balance, (id,))
+            cursor.execute(query, (id,))
             balance_result = cursor.fetchone()
 
             if balance_result is None:
@@ -266,10 +266,10 @@ class GamblerInfoHandler:
 
             balance = balance_result[0]
 
-            q_get_rank = """
+            query = """
                 SELECT COUNT(*) FROM Gambler_Tally WHERE balance_cents > ?;
             """
-            cursor.execute(q_get_rank, (balance,))
+            cursor.execute(query, (balance,))
             rank_above = cursor.fetchone()[0]
 
             return rank_above + 1
@@ -305,10 +305,10 @@ class GamblerInfoHandler:
             return
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
-            q_update_tally = """
+            query = """
                 UPDATE Gambler_Tally SET tally = ? WHERE id = ?;
             """
-            cursor.execute(q_update_tally, (json.dumps(tally), id))
+            cursor.execute(query, (json.dumps(tally), id))
             connection.commit()
 
     def update_balance(self, id: int, balance: int) -> None:
@@ -316,10 +316,10 @@ class GamblerInfoHandler:
             return
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
-            q_update_balance = """
+            query = """
                 UPDATE Gambler_Tally SET balance_cents = ? WHERE id = ?;
             """
-            cursor.execute(q_update_balance, (balance, id))
+            cursor.execute(query, (balance, id))
             connection.commit()
 
 
