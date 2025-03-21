@@ -10,6 +10,7 @@ import argparse
 import logging
 import os
 import sys
+from enum import Enum
 
 import sqlite3
 import shutil
@@ -41,7 +42,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-EMOJI = {"seven": "7️⃣", "bar": "◼️", "lemon": "🍋", "grape": "🍇"}
+
+class Slot_Emoji(str, Enum):
+    SEVEN = "7️⃣"
+    BAR = "◼️"
+    LEMON = "🍋"
+    GRAPE = "🍇"
+    ANY = ""
 
 
 # config class
@@ -314,10 +321,10 @@ async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 Total Plays: {total_plays}
 
 Wins:
-{EMOJI["seven"]}{EMOJI["seven"]}{EMOJI["seven"]}: {data["tally"][triple_seven]}
-{EMOJI["bar"]}{EMOJI["bar"]}{EMOJI["bar"]}: {data["tally"][triple_bar]}
-{EMOJI["lemon"]}{EMOJI["lemon"]}{EMOJI["lemon"]}: {data["tally"][triple_lemon]}
-{EMOJI["grape"]}{EMOJI["grape"]}{EMOJI["grape"]}: {data["tally"][triple_grape]}
+{Slot_Emoji.SEVEN*3}: {data["tally"][triple_seven]}
+{Slot_Emoji.BAR*3}: {data["tally"][triple_bar]}
+{Slot_Emoji.LEMON*3}: {data["tally"][triple_lemon]}
+{Slot_Emoji.GRAPE*3}: {data["tally"][triple_grape]}
 
 Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/100:.2f}
 """
@@ -328,10 +335,10 @@ Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/1
 async def paytable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = f"""
 Payout:
-{EMOJI["seven"]}{EMOJI["seven"]}{EMOJI["seven"]}: $20.00
-{EMOJI["bar"]}{EMOJI["bar"]}{EMOJI["bar"]}: $10.00
-{EMOJI["lemon"]}{EMOJI["lemon"]}{EMOJI["lemon"]}/{EMOJI["grape"]}{EMOJI["grape"]}{EMOJI["grape"]}: $2.50
-Any Two {EMOJI["bar"]}: $0.25
+{Slot_Emoji.SEVEN*3}: $20.00
+{Slot_Emoji.BAR*3}: $10.00
+{Slot_Emoji.LEMON*3}/{Slot_Emoji.GRAPE*3}: $2.50
+Any Two {Slot_Emoji.BAR}: $0.25
 
 Bet Amount = $0.25
 """
