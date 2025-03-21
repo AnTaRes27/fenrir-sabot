@@ -268,13 +268,13 @@ class GamblerInfoHandler:
         slot_payout_table: list[dict[list[Slot_Emoji, Slot_Emoji, Slot_Emoji], int]],
         bet_cents: int,
     ) -> int:
-        with sqlite3.connect("dev_gambling.db") as connection:
+        with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             query = """
                 INSERT INTO Gambler_Ledger (user_id, emoji, value, slot_paytable, bet_cents)
                 VALUES (?, ?, ?, ?, ?);
             """
-            entry_data = (id, emoji, value, slot_payout_table, bet_cents)
+            entry_data = (id, emoji, value, json.dumps(slot_payout_table), bet_cents)
             cursor.execute(query, entry_data)
 
     def update_tally(self, id: int, tally: list) -> None:
