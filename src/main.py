@@ -6,6 +6,7 @@ Fenrir Sabot
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -22,6 +23,15 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+# process argument
+argparser = argparse.ArgumentParser(description="FENRIR")
+argparser.add_argument(
+    "--config", default="config.yaml", type=str, help="Config filename"
+)
+args = argparser.parse_args()
+config_filename = args.config
+
 
 # enable logging
 logging.basicConfig(
@@ -57,7 +67,7 @@ class Config:
         self.token = self.config["bot"]["token"]
 
 
-config = Config("config.yaml")
+config = Config(config_filename)
 
 
 # gambler info handler class
