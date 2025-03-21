@@ -72,6 +72,7 @@ class Config:
 
         self.db_filename = self.config["database"]["filename"]
         self.token = self.config["bot"]["token"]
+        self.dev_mode = self.config["bot"]["dev_mode"]
 
 
 config = Config(config_filename)
@@ -246,6 +247,8 @@ class GamblerInfoHandler:
             return rank_above + 1
 
     def update_tally(self, id: int, tally: list) -> None:
+        if config.dev_mode:
+            return
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_update_tally = """
@@ -255,6 +258,8 @@ class GamblerInfoHandler:
             connection.commit()
 
     def update_balance(self, id: int, balance: int) -> None:
+        if config.dev_mode:
+            return
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_update_balance = """
