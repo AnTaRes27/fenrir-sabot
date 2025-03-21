@@ -92,7 +92,8 @@ class GamblerInfoHandler:
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 tally TEXT NOT NULL,
-                balance_cents INTEGER NOT NULL
+                balance_cents INTEGER NOT NULL,
+                username TEXT
             );
             """
             cursor.execute(q_create_table)
@@ -108,6 +109,17 @@ class GamblerInfoHandler:
             );
             """
             cursor.execute(query)
+
+            # v1 db adds username
+            cursor.execute("PRAGMA user_version;")
+            db_ver = cursor.fetchone()
+            if db_ver[0] < 1:
+                query = """
+                    ALTER TABLE Gambler_Tally ADD COLUMN username TEXT;
+                """
+                cursor.execute(query)
+                cursor.execute("PRAGMA user_version = 1")
+
         self.setup_slot_machine_values()
 
     def setup_slot_machine_values(self):
@@ -169,7 +181,7 @@ class GamblerInfoHandler:
             symbols = self.SLOT_MACHINE_VALUE[value]
             return f"{symbols[0].capitalize()}-{symbols[1].capitalize()}-{symbols[2].capitalize()}"
 
-    def init_data(self, id: int, name: str) -> dict[int, str, list, int]:
+    def init_data(self, id: int, name: str, username: str) -> dict[int, str, list, int]:
         # telegram's slot machine is a 1-64 RNG, each number corresponds to a 3 slot combo
         tally = []
         for x in range(64):
@@ -183,10 +195,10 @@ class GamblerInfoHandler:
             cursor = connection.cursor()
 
             q_add_entry = """
-            INSERT INTO Gambler_Tally (id, name, tally, balance_cents)
-            VALUES (?, ?, ?, ?);
+            INSERT INTO Gambler_Tally (id, name, tally, balance_cents, username)
+            VALUES (?, ?, ?, ?, ?);
             """
-            entry_data = (id, name, tally_json, balance_cents)
+            entry_data = (id, name, tally_json, balance_cents, username)
 
             cursor.execute(q_add_entry, entry_data)
             connection.commit()
@@ -195,24 +207,26 @@ class GamblerInfoHandler:
             "name": name,
             "tally": json.loads(tally_json),
             "balance_cents": balance_cents,
+            "username": username,
         }
 
-    def get_data(self, id: int, name: str) -> dict[int, str, list, int]:
+    def get_data(self, id: int, name: str, username: str) -> dict[int, str, list, int]:
         with sqlite3.connect(self.db_filename) as connection:
             cursor = connection.cursor()
             q_get_user = """
-                SELECT id, name, tally, balance_cents FROM Gambler_Tally WHERE id=?;
+                SELECT id, name, tally, balance_cents, username FROM Gambler_Tally WHERE id=?;
             """
             cursor.execute(q_get_user, (id,))
             data = cursor.fetchone()
             if data is None:
-                return self.init_data(id, name)
+                return self.init_data(id, name, username)
             else:
                 return {
                     "id": data[0],
                     "name": data[1],
                     "tally": json.loads(data[2]),
                     "balance_cents": data[3],
+                    "username": data[4],
                 }
 
     def get_leaderboard(self, limit: int) -> list[dict[int, str, list, int]]:
@@ -277,6 +291,15 @@ class GamblerInfoHandler:
             entry_data = (id, emoji, value, json.dumps(slot_payout_table), bet_cents)
             cursor.execute(query, entry_data)
 
+    def update_user_data(self, id: int, name: str, username: str) -> None:
+        with sqlite3.connect(self.db_filename) as connection:
+            cursor = connection.cursor()
+            query = """
+                UPDATE Gambler_Tally SET name = ?, username = ? WHERE id = ?;
+            """
+            entry_data = (name, username, id)
+            cursor.execute(query, entry_data)
+
     def update_tally(self, id: int, tally: list) -> None:
         if config.dev_mode:
             return
@@ -331,13 +354,19 @@ async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     username = update.message.from_user.username
     reply_to_message_obj = update.message.reply_to_message
 
+    # update name and username
+    gambler_info_handler.update_user_data(id, name, username)
+
     if reply_to_message_obj is not None:
         reply_to_user_id = reply_to_message_obj.from_user.id
         reply_to_user_name = reply_to_message_obj.from_user.full_name
+        reply_to_user_username = reply_to_message_obj.from_user.username
         username = reply_to_message_obj.from_user.username
-        data = gambler_info_handler.get_data(reply_to_user_id, reply_to_user_name)
+        data = gambler_info_handler.get_data(
+            reply_to_user_id, reply_to_user_name, reply_to_user_username
+        )
     else:
-        data = gambler_info_handler.get_data(id, name)
+        data = gambler_info_handler.get_data(id, name, username)
 
     logger.info(f"stat call: {data}")
     total_plays = sum(data["tally"])
@@ -404,6 +433,7 @@ async def paytable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     current_user_id = update.message.from_user.id
     current_user_name = update.message.from_user.full_name
+    current_user_username = update.message.from_user.username
 
     top_users = gambler_info_handler.get_leaderboard(10)
 
@@ -418,7 +448,7 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     current_user_in_top = any(user["id"] == current_user_id for user in top_users)
 
     current_user_data = gambler_info_handler.get_data(
-        current_user_id, current_user_name
+        current_user_id, current_user_name, current_user_username
     )
     current_user_rank = gambler_info_handler.get_user_rank(current_user_id)
     has_played = sum(current_user_data["tally"]) > 0
@@ -456,8 +486,9 @@ async def slot_machine_handler(
 ) -> None:
     id = update.message.from_user.id
     name = update.message.from_user.full_name
+    username = update.message.from_user.username
     value = update.message.dice.value
-    data = gambler_info_handler.get_data(id, name)
+    data = gambler_info_handler.get_data(id, name, username)
     bet_cents = 25
 
     # update tally
@@ -470,7 +501,7 @@ async def slot_machine_handler(
     balance = data["balance_cents"]
 
     # price of play
-    balance -= 25
+    balance -= bet_cents
 
     if value == gambler_info_handler.TRIPLE_SEVEN:
         balance_add = 2000
