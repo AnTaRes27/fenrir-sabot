@@ -11,12 +11,14 @@ import logging
 import os
 import sys
 from enum import Enum
+import json
+from typing import List, Dict, Tuple, Any
 
 import sqlite3
 import shutil
 import yaml
 import json
-from telegram import Update, constants, Dice
+from telegram import Update, Dice
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -43,12 +45,110 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-class Slot_Emoji(str, Enum):
+class SlotEmoji(str, Enum):
     SEVEN = "7️⃣"
     BAR = "◼️"
     LEMON = "🍋"
     GRAPE = "🍇"
     ANY = ""
+
+    @classmethod
+    def from_value(cls, value: str) -> 'SlotEmoji':
+        for emoji in cls:
+            if emoji.value == value:
+                return emoji
+        return cls.ANY  # Default to ANY if not found
+
+class PaytableEntry:
+    """Structured class for paytable entries"""
+    def __init__(self, combo: List[str], payout_mult: int):
+        self.combo = [SlotEmoji.from_value(emoji) for emoji in combo]
+        self.payout_mult = payout_mult
+        
+    def matches(self, slot_result: Tuple[str, str, str]) -> bool:
+        if len(self.combo) != len(slot_result):
+            return False
+            
+        for i, emoji in enumerate(self.combo):
+            if emoji != SlotEmoji.ANY and emoji != slot_result[i]:
+                return False
+        return True
+        
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "combo": [emoji.value for emoji in self.combo],
+            "payout_mult": self.payout_mult
+        }
+        
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'PaytableEntry':
+        return cls(data["combo"], data["payout_mult"])
+        
+    def __str__(self) -> str:
+        emoji_str = ''.join([emoji.value if emoji != SlotEmoji.ANY else '*' for emoji in self.combo])
+        return f"{emoji_str}: x{self.payout_mult}"
+
+class Paytable:
+    """Handles paytable operations and lookups"""
+    def __init__(self, paytable_config: str):
+        self.entries: List[PaytableEntry] = []
+        self._load_from_config(paytable_config)
+        
+    def _load_from_config(self, paytable_config) -> None:
+        """Load paytable from config"""
+        if isinstance(paytable_config, list):
+            if len(paytable_config) == 0:
+                raise ValueError("Paytable is empty")
+            paytable_data = paytable_config
+        else:
+            paytable_data = json.loads(paytable_config)
+
+        self.entries = [PaytableEntry.from_dict(entry) for entry in paytable_data]
+
+    def get_payout_multiplier(self, value: int, slot_mappings: Dict[int, Tuple[str, str, str]]) -> int:
+        """Get the payout multiplier for a specific slot value"""
+        if value not in slot_mappings:
+            return 0
+
+        slot_result = slot_mappings[value]
+        slot_emojis = tuple(SlotEmoji[symbol.upper()].value for symbol in slot_result)
+
+        for entry in self.entries:
+            if entry.matches(slot_emojis):
+                return entry.payout_mult
+
+        return 0  # No match found
+        
+    def to_display_string(self, bet_cents: int) -> str:
+        """Generate a readable paytable display"""
+        message = "Payout:\n"
+        
+        for entry in self.entries:
+            combo = entry.combo
+            payout_amount = f"{entry.payout_mult * bet_cents / 100:.2f}"
+
+            # Count non-ANY symbols for display logic
+            non_any = [emoji for emoji in combo if emoji != SlotEmoji.ANY]
+            any_count = combo.count(SlotEmoji.ANY)
+
+            if any_count == 0:
+                # All three symbols are the same
+                emoji = non_any[0]
+                message += f"{emoji*3}: x{entry.payout_mult} (${payout_amount})\n"
+            elif any_count == 2 and len(non_any) == 1:
+                # One symbol anywhere
+                emoji = non_any[0]
+                message += f"Any {emoji}: x{entry.payout_mult} (${payout_amount})\n"
+            elif any_count == 1 and combo[0] == combo[1] and combo[0] != SlotEmoji.ANY:
+                # Two of the same symbol
+                emoji = non_any[0]
+                message += f"Any two {emoji}: x{entry.payout_mult} (${payout_amount})\n"
+            else:
+                # Any other combo
+                message += f"Any combo of {''.join(non_any)}: x{entry.payout_mult} (${payout_amount})\n"
+
+        message += f"\nBet Amount = ${bet_cents/100:.2f}"
+        return message
 
 
 # config class
@@ -73,9 +173,14 @@ class Config:
         self.db_filename = self.config["database"]["filename"]
         self.token = self.config["bot"]["token"]
         self.dev_mode = self.config["bot"]["dev_mode"]
-        self.paytable = json.loads(
-            self.config["game_settings"]["slot_machine"]["paytable"]
-        )
+
+        game_settings = self.config.get("game_settings", {})
+        slot_machine_settings = game_settings.get("slot_machine", {})
+
+        paytable_config = slot_machine_settings.get("paytable", [])
+        self.paytable = Paytable(paytable_config)
+
+        self.bet_cents = slot_machine_settings.get("bet_cents", 25)
 
 
 config = Config(config_filename)
@@ -85,42 +190,50 @@ config = Config(config_filename)
 class GamblerInfoHandler:
     def __init__(self, db_filename: str) -> None:
         self.db_filename = db_filename
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
-            query = """
-            CREATE TABLE IF NOT EXISTS Gambler_Tally (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                tally TEXT NOT NULL,
-                balance_cents INTEGER NOT NULL,
-                username TEXT
-            );
-            """
-            cursor.execute(query)
+        self.connection = sqlite3.connect(self.db_filename, check_same_thread=False)
 
-            query = """
-            CREATE TABLE IF NOT EXISTS Gambler_Ledger (
-                trans_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                emoji TEXT NOT NULL,
-                value INTEGER NOT NULL,
-                slot_paytable TEXT,
-                bet_cents INTEGER
-            );
-            """
-            cursor.execute(query)
+        cursor = self.connection.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Gambler_Tally (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            tally TEXT NOT NULL,
+            balance_cents INTEGER NOT NULL,
+            username TEXT
+        );
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Gambler_Ledger (
+            trans_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            emoji TEXT NOT NULL,
+            value INTEGER NOT NULL,
+            slot_paytable TEXT,
+            bet_cents INTEGER
+        );
+        """)
 
-            # v1 db adds username
-            cursor.execute("PRAGMA user_version;")
-            db_ver = cursor.fetchone()
-            if db_ver[0] < 1:
-                query = """
-                    ALTER TABLE Gambler_Tally ADD COLUMN username TEXT;
-                """
-                cursor.execute(query)
-                cursor.execute("PRAGMA user_version = 1")
+        # v1 db adds username
+        cursor.execute("PRAGMA user_version;")
+        db_ver = cursor.fetchone()
+        if db_ver[0] < 1:
+            cursor.execute("ALTER TABLE Gambler_Tally ADD COLUMN username TEXT;")
+            cursor.execute("PRAGMA user_version = 1")
+
+        cursor.execute("PRAGMA journal_mode = WAL;")
+        cursor.execute("PRAGMA synchronous = NORMAL;")
+        cursor.execute("PRAGMA cache_size = 1000;")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_gambler_id ON Gambler_Tally(id);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON Gambler_Ledger(user_id);")
+
+        self.connection.commit()
 
         self.setup_slot_machine_values()
+
+    def __del__(self):
+        if hasattr(self, 'connection'):
+            self.connection.close()
 
     def setup_slot_machine_values(self):
         """Set up slot machine values with meaningful lookups."""
@@ -191,17 +304,15 @@ class GamblerInfoHandler:
         # store money as cents, makes more cents than real ahahahaaaa
         balance_cents = 0
 
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
+        cursor = self.connection.cursor()
+        query = """
+        INSERT INTO Gambler_Tally (id, name, tally, balance_cents, username)
+        VALUES (?, ?, ?, ?, ?);
+        """
+        entry_data = (id, name, tally_json, balance_cents, username)
+        cursor.execute(query, entry_data)
+        self.connection.commit()
 
-            query = """
-            INSERT INTO Gambler_Tally (id, name, tally, balance_cents, username)
-            VALUES (?, ?, ?, ?, ?);
-            """
-            entry_data = (id, name, tally_json, balance_cents, username)
-
-            cursor.execute(query, entry_data)
-            connection.commit()
         return {
             "id": id,
             "name": name,
@@ -211,116 +322,125 @@ class GamblerInfoHandler:
         }
 
     def get_data(self, id: int, name: str, username: str) -> dict[int, str, list, int]:
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
-            query = """
-                SELECT id, name, tally, balance_cents, username FROM Gambler_Tally WHERE id=?;
-            """
-            cursor.execute(query, (id,))
-            data = cursor.fetchone()
-            if data is None:
-                return self.init_data(id, name, username)
-            else:
-                return {
-                    "id": data[0],
-                    "name": data[1],
-                    "tally": json.loads(data[2]),
-                    "balance_cents": data[3],
-                    "username": data[4],
-                }
+        cursor = self.connection.cursor()
+        query = """
+            SELECT id, name, tally, balance_cents, username FROM Gambler_Tally WHERE id=?;
+        """
+        cursor.execute(query, (id,))
+        data = cursor.fetchone()
+
+        if data is None:
+            return self.init_data(id, name, username)
+        else:
+            return {
+                "id": data[0],
+                "name": data[1],
+                "tally": json.loads(data[2]),
+                "balance_cents": data[3],
+                "username": data[4],
+            }
 
     def get_leaderboard(self, limit: int) -> list[dict[int, str, list, int]]:
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
-            query = """
-                SELECT id, name, tally, balance_cents FROM Gambler_Tally ORDER BY balance_cents DESC LIMIT ?;
-            """
-            cursor.execute(query, (limit,))
-            data = cursor.fetchall()
+        cursor = self.connection.cursor()
+        query = """
+            SELECT id, name, tally, balance_cents FROM Gambler_Tally ORDER BY balance_cents DESC LIMIT ?;
+        """
+        cursor.execute(query, (limit,))
+        data = cursor.fetchall()
 
-            if not data:
-                return []
+        if not data:
+            return []
 
-            return [
-                {
-                    "id": user[0],
-                    "name": user[1],
-                    "tally": json.loads(user[2]),
-                    "balance_cents": user[3],
-                }
-                for user in data
-            ]
+        return [
+            {
+                "id": user[0],
+                "name": user[1],
+                "tally": json.loads(user[2]),
+                "balance_cents": user[3],
+            }
+            for user in data
+        ]
 
     def get_user_rank(self, id: int) -> int:
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
+        cursor = self.connection.cursor()
 
+        query = """
+            SELECT balance_cents FROM Gambler_Tally WHERE id = ?;
+        """
+        cursor.execute(query, (id,))
+        balance_result = cursor.fetchone()
+
+        if balance_result is None:
+            return 0  # User not found
+
+        balance = balance_result[0]
+
+        query = """
+            SELECT COUNT(*) FROM Gambler_Tally WHERE balance_cents > ?;
+        """
+        cursor.execute(query, (balance,))
+        rank_above = cursor.fetchone()[0]
+
+        return rank_above + 1
+
+    def update_user_data(self, id: int, name: str, username: str) -> None:
+        cursor = self.connection.cursor()
+        query = """
+            UPDATE Gambler_Tally SET name = ?, username = ? WHERE id = ?;
+        """
+        entry_data = (name, username, id)
+        cursor.execute(query, entry_data)
+        self.connection.commit()
+
+    def process_slot_machine(self, id: int, name: str, username: str, value: int, 
+                             emoji: str, slot_payout_table: list, bet_cents: int) -> int:
+        """Process a slot machine play and update all relevant info"""
+        if config.dev_mode:
+            return 0
+
+        data = self.get_data(id, name, username)
+
+        tally = data["tally"]
+        tally[value - 1] += 1
+        tally_json = json.dumps(tally)
+        
+        balance = data["balance_cents"]
+        balance -= bet_cents  # Cost of play
+
+        payout_mult = config.paytable.get_payout_multiplier(value, gambler_info_handler.SLOT_MACHINE_VALUE)
+
+        balance_add = payout_mult * bet_cents
+        balance += balance_add
+
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("BEGIN TRANSACTION")
+
+            # Update tally & balance
             query = """
-                SELECT balance_cents FROM Gambler_Tally WHERE id = ?;
+                UPDATE Gambler_Tally 
+                SET tally = ?, balance_cents = ? 
+                WHERE id = ?;
             """
-            cursor.execute(query, (id,))
-            balance_result = cursor.fetchone()
+            cursor.execute(query, (tally_json, balance, id))
 
-            if balance_result is None:
-                return 0  # User not found
-
-            balance = balance_result[0]
-
-            query = """
-                SELECT COUNT(*) FROM Gambler_Tally WHERE balance_cents > ?;
-            """
-            cursor.execute(query, (balance,))
-            rank_above = cursor.fetchone()[0]
-
-            return rank_above + 1
-
-    def record_transaction(
-        self,
-        id: int,
-        emoji: constants.DiceEmoji,
-        value: int,
-        slot_payout_table: list[dict[list[Slot_Emoji, Slot_Emoji, Slot_Emoji], int]],
-        bet_cents: int,
-    ) -> int:
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
+            # Record transaction
             query = """
                 INSERT INTO Gambler_Ledger (user_id, emoji, value, slot_paytable, bet_cents)
                 VALUES (?, ?, ?, ?, ?);
             """
-            entry_data = (id, emoji, value, json.dumps(slot_payout_table), bet_cents)
+
+            paytable_json = json.dumps([entry.to_dict() for entry in config.paytable.entries])
+            entry_data = (id, emoji, value, paytable_json, bet_cents)
             cursor.execute(query, entry_data)
 
-    def update_user_data(self, id: int, name: str, username: str) -> None:
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
-            query = """
-                UPDATE Gambler_Tally SET name = ?, username = ? WHERE id = ?;
-            """
-            entry_data = (name, username, id)
-            cursor.execute(query, entry_data)
+            cursor.execute("COMMIT")
+            return balance
 
-    def update_tally(self, id: int, tally: list) -> None:
-        if config.dev_mode:
-            return
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
-            query = """
-                UPDATE Gambler_Tally SET tally = ? WHERE id = ?;
-            """
-            cursor.execute(query, (json.dumps(tally), id))
-            connection.commit()
-
-    def update_balance(self, id: int, balance: int) -> None:
-        if config.dev_mode:
-            return
-        with sqlite3.connect(self.db_filename) as connection:
-            cursor = connection.cursor()
-            query = """
-                UPDATE Gambler_Tally SET balance_cents = ? WHERE id = ?;
-            """
-            cursor.execute(query, (balance, id))
-            connection.commit()
+        except Exception as e:
+            cursor.execute("ROLLBACK")
+            logger.error(f"Transaction failed: {e}")
+            return data["balance_cents"]  # Return original balance on fail
 
 
 gambler_info_handler = GamblerInfoHandler(config.db_filename)
@@ -386,10 +506,10 @@ async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 Total Plays: {total_plays}
 
 Wins:
-{Slot_Emoji.SEVEN*3}: {data["tally"][triple_seven]}
-{Slot_Emoji.BAR*3}: {data["tally"][triple_bar]}
-{Slot_Emoji.LEMON*3}: {data["tally"][triple_lemon]}
-{Slot_Emoji.GRAPE*3}: {data["tally"][triple_grape]}
+{SlotEmoji.SEVEN.value*3}: {data["tally"][triple_seven]}
+{SlotEmoji.BAR.value*3}: {data["tally"][triple_bar]}
+{SlotEmoji.LEMON.value*3}: {data["tally"][triple_lemon]}
+{SlotEmoji.GRAPE.value*3}: {data["tally"][triple_grape]}
 
 Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/100:.2f}
 """
@@ -398,34 +518,7 @@ Balance: {"" if data["balance_cents"]>=0 else "-"}${abs(data["balance_cents"])/1
 
 @command_handler("paytable")
 async def paytable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    bet_cents = 25
-
-    message = "Payout:\n"
-
-    for payout_row in config.paytable:
-        non_any_emoji = [x for x in payout_row["combo"] if x != Slot_Emoji.ANY]
-        payout_amount = f"""{payout_row["payout_mult"]*bet_cents/100:.2f}"""
-        if payout_row["combo"].count(Slot_Emoji.ANY) == 0:
-            emoji = non_any_emoji[0]
-            message += (
-                f"""{emoji*3}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
-            )
-        elif payout_row["combo"].count(Slot_Emoji.ANY) == 2:
-            emoji = non_any_emoji[0]
-            message += (
-                f"""Any {emoji}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
-            )
-        elif (
-            payout_row["combo"].count(Slot_Emoji.ANY) == 1
-            and payout_row["combo"][0] == payout_row["combo"][1]
-        ):
-            emoji = non_any_emoji[0]
-            message += f"""Any two {emoji}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
-        else:
-            message += f"""Any combo of {"".join(non_any_emoji)}: x{payout_row["payout_mult"]} (${payout_amount})\n"""
-    message += "\n"
-
-    message += f"Bet Amount = ${bet_cents/100:.2f}"
+    message = config.paytable.to_display_string(config.bet_cents)
     await update.message.reply_text(message)
 
 
@@ -489,42 +582,16 @@ async def slot_machine_handler(
     username = update.message.from_user.username
     value = update.message.dice.value
     data = gambler_info_handler.get_data(id, name, username)
-    bet_cents = 25
+    bet_cents = config.bet_cents
 
-    # update tally
-    tally = data["tally"]
-    tally[value - 1] += 1
-    gambler_info_handler.update_tally(id, tally)
-
-    # update balance
-    # remember they're in cents
-    balance = data["balance_cents"]
-
-    # price of play
-    balance -= bet_cents
-
-    if value == gambler_info_handler.TRIPLE_SEVEN:
-        balance_add = 2000
-    elif value == gambler_info_handler.TRIPLE_BAR:
-        balance_add = 1000
-    elif (
-        value == gambler_info_handler.TRIPLE_LEMON
-        or value == gambler_info_handler.TRIPLE_GRAPE
-    ):
-        balance_add = 250
-    elif value in gambler_info_handler.DOUBLE_BAR_COMBOS:
-        balance_add = 25
-    else:
-        balance_add = 0
-
-    balance += balance_add
-    gambler_info_handler.update_balance(id, balance)
+    balance = gambler_info_handler.process_slot_machine(
+        id, name, username, value, Dice.SLOT_MACHINE, config.paytable, bet_cents
+    )
 
     combo_name = gambler_info_handler.get_combo_name(value)
 
-    gambler_info_handler.record_transaction(
-        id, Dice.SLOT_MACHINE, value, config.paytable, bet_cents
-    )
+    data = gambler_info_handler.get_data(id, name, username)
+    tally = data["tally"]
 
     logger.info(
         f"""{name}({id}) - {combo_name} - Total Games: {sum(tally)} - Balance: {"" if balance>=0 else "-"}${abs(balance)/100:.2f}"""
