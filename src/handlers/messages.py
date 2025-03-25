@@ -54,7 +54,7 @@ async def slot_machine_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.set_reaction("✨")
     elif value == db_handler.TRIPLE_SEVEN:
         await update.message.set_reaction("🔥")
-        await update.message.reply_text("Big win!")
+        await update.message.reply_text("Ahoy!")
 
 async def debugging(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """logs user message for debugging"""
