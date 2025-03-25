@@ -70,7 +70,7 @@ async def slot_machine_handler(
         db_handler.TRIPLE_GRAPE,
         db_handler.TRIPLE_BAR,
     ):
-        await update.message.set_reaction("✨")
+        await update.message.set_reaction("👏")
     elif value == db_handler.TRIPLE_SEVEN:
         await update.message.set_reaction("🔥")
         await update.message.reply_text("Ahoy!")
