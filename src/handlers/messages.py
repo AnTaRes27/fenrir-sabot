@@ -79,4 +79,5 @@ async def slot_machine_handler(
 async def debugging(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """logs user message for debugging"""
     logger.info(update.message)
-    logger.info(update.message.from_user)
+    if update.message is not None:  # if none it's probably an edit or something
+        logger.info(update.message.from_user)
