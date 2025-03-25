@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 db_handler = None
 config = None
 
+
 def init(app: Any, config_obj: Config, _db_handler: DbHandler):
     global config, db_handler
 
@@ -29,11 +30,13 @@ def init(app: Any, config_obj: Config, _db_handler: DbHandler):
 
     register_commands(app)
 
+
 def register_commands(app):
     app.add_handler(CommandHandler("stat", stat))
     app.add_handler(CommandHandler("paytable", paytable))
     app.add_handler(CommandHandler("leaderboard", leaderboard))
     app.add_handler(CommandHandler("redeem", redeem))
+
 
 async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     id = update.message.from_user.id
@@ -61,9 +64,7 @@ async def stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Handle case where username might be None
     display_name = f"@{username}" if username else name
 
-    triple_seven = (
-        db_handler.TRIPLE_SEVEN - 1
-    )  # Adjust for 0-indexing in tally
+    triple_seven = db_handler.TRIPLE_SEVEN - 1  # Adjust for 0-indexing in tally
     triple_bar = db_handler.TRIPLE_BAR - 1
     triple_lemon = db_handler.TRIPLE_LEMON - 1
     triple_grape = db_handler.TRIPLE_GRAPE - 1
@@ -82,9 +83,11 @@ Balance: {parse_dollar_amount(data["balance_cents"])}
 """
     await update.message.reply_text(message)
 
+
 async def paytable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = config.paytable.to_display_string(config.bet_cents)
     await update.message.reply_text(message)
+
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     current_user_id = update.message.from_user.id
@@ -113,20 +116,21 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     for i, user in enumerate(top_users):
         rank = i + 1
-        balance = user["balance_cents"] / 100
+        balance = user["balance_cents"]
         balance_str = parse_dollar_amount(balance)
         user_indicator = " (You)" if user["id"] == current_user_id else ""
         message += f"{rank}. {user['name']}: {balance_str}{user_indicator}\n"
 
     if has_played and not current_user_in_top:
         message += "...\n"
-        current_user_balance = current_user_data["balance_cents"] / 100
+        current_user_balance = current_user_data["balance_cents"]
         balance_str = parse_dollar_amount(current_user_balance)
         message += f"{current_user_rank}. {current_user_name}: {balance_str} (You)\n"
     elif not has_played:
         message += "\nYou haven't tried your luck yet... Send the 🎰 emoji to win big!"
 
     await update.message.reply_text(message)
+
 
 async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Placeholder for redeem command
