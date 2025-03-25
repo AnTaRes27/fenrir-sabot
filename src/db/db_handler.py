@@ -15,6 +15,7 @@ from ..config import Config
 
 logger = logging.getLogger(__name__)
 
+
 class DbHandler:
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -22,7 +23,8 @@ class DbHandler:
         self.connection = sqlite3.connect(self.db_filename, check_same_thread=False)
 
         cursor = self.connection.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS Gambler_Tally (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
@@ -30,8 +32,10 @@ class DbHandler:
             balance_cents INTEGER NOT NULL,
             username TEXT
         );
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS Gambler_Ledger (
             trans_id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -40,7 +44,8 @@ class DbHandler:
             slot_paytable TEXT,
             bet_cents INTEGER
         );
-        """)
+        """
+        )
 
         # v1 db adds username
         cursor.execute("PRAGMA user_version;")
@@ -54,15 +59,19 @@ class DbHandler:
         cursor.execute("PRAGMA synchronous = NORMAL;")
         cursor.execute("PRAGMA cache_size = 1000;")
 
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_gambler_id ON Gambler_Tally(id);")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON Gambler_Ledger(user_id);")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gambler_id ON Gambler_Tally(id);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON Gambler_Ledger(user_id);"
+        )
 
         self.connection.commit()
 
         self.setup_slot_machine_values()
 
     def __del__(self):
-        if hasattr(self, 'connection'):
+        if hasattr(self, "connection"):
             self.connection.close()
 
     def setup_slot_machine_values(self):
@@ -218,8 +227,16 @@ class DbHandler:
         cursor.execute(query, entry_data)
         self.connection.commit()
 
-    def process_slot_machine(self, id: int, name: str, username: str, value: int, 
-                             emoji: str, paytable: Paytable, bet_cents: int) -> int:
+    def process_slot_machine(
+        self,
+        id: int,
+        name: str,
+        username: str,
+        value: int,
+        emoji: str,
+        paytable: Paytable,
+        bet_cents: int,
+    ) -> int:
         """Processes a slot machine play and updates all relevant info, returning the new balance"""
 
         if self.config.dev_mode:
@@ -231,7 +248,7 @@ class DbHandler:
         tally = data["tally"]
         tally[value - 1] += 1
         tally_json = json.dumps(tally)
-        
+
         balance = data["balance_cents"]
         balance -= bet_cents  # Cost of play
 
