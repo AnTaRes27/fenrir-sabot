@@ -174,7 +174,7 @@ cython_debug/
 .pypirc
 
 #project specific
-*gambling.db*
+*.db*
 config.yaml
 *.ipynb
 dev*

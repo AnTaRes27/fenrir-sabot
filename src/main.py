@@ -40,12 +40,14 @@ db_handler = DbHandler(config)
 # Init telegram bot
 app = ApplicationBuilder().token(config.token).build()
 
+
 def main() -> None:
     commands.init(app, config, db_handler)
     messages.init(app, config, db_handler)
 
     logger.info("Starting bot...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
