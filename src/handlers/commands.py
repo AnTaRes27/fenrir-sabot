@@ -116,15 +116,13 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     for i, user in enumerate(top_users):
         rank = i + 1
-        balance = user["balance_cents"]
-        balance_str = parse_dollar_amount(balance)
+        balance_str = parse_dollar_amount(user["balance_cents"])
         user_indicator = " (You)" if user["id"] == current_user_id else ""
         message += f"{rank}. {user['name']}: {balance_str}{user_indicator}\n"
 
     if has_played and not current_user_in_top:
         message += "...\n"
-        current_user_balance = current_user_data["balance_cents"]
-        balance_str = parse_dollar_amount(current_user_balance)
+        balance_str = parse_dollar_amount(current_user_data["balance_cents"])
         message += f"{current_user_rank}. {current_user_name}: {balance_str} (You)\n"
     elif not has_played:
         message += "\nYou haven't tried your luck yet... Send the 🎰 emoji to win big!"
